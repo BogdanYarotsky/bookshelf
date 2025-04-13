@@ -1,14 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
-	"html"
+	"io"
 	"log"
 	"net/http"
 	"os"
-	"runtime/debug"
-	"strings"
 
 	"github.com/jackc/pgx"
 )
@@ -34,12 +33,12 @@ func main() {
 	}
 
 	pool, err := pgx.NewConnPool(pgx.ConnPoolConfig{
-		ConnConfig:     pgx.ConnConfig{
-			Host:              "localhost",
-			Port:              5432,
-			Database:          "bookshelf",
-			User:              "bookshelf",
-			Password:          "bookshelf",
+		ConnConfig: pgx.ConnConfig{
+			Host:     "localhost",
+			Port:     5432,
+			Database: "bookshelf",
+			User:     "bookshelf",
+			Password: "bookshelf",
 		},
 	})
 
@@ -50,35 +49,56 @@ func main() {
 
 	defer pool.Close()
 
-	http.HandleFunc("/book", func(w http.ResponseWriter, r *http.Request) {
-		test, err := pool.Acquire();
-		if (err == nil) {
-			fmt.Fprintln(w, "It wooooorks!");
+	http.HandleFunc("/name", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := pool.Acquire()
+		if err != nil {
+			http.Error(w, "Could not connect.", 500)
+			return
 		}
-		defer test.Close();
+		defer conn.Close()
+
+		if r.Method == "GET" {
+			var names []string
+			rows, err := conn.Query("SELECT first_name from first_table")
+			if err != nil {
+				log.Printf("Query error: %v", err)
+				http.Error(w, "Query failed.", http.StatusInternalServerError)
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				err = rows.Scan(&name)
+				if err != nil {
+					http.Error(w, "todo", 500)
+					return
+				}
+				names = append(names, name)
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(names)
+
+		} else if r.Method == "POST" {
+			defer r.Body.Close()
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "todo", 500)
+			}
+
+			body := string(bodyBytes)
+			_, err = conn.Exec("INSERT INTO first_table (first_name) VALUES ($1)", body)
+			if err != nil {
+				http.Error(w, "Insert failed.", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintln(w, "Name added successfully")
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
 	})
 
 	log.Printf("serving http://%s\n", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
-}
-
-func version(w http.ResponseWriter, r *http.Request) {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		http.Error(w, "no build information available", 500)
-		return
-	}
-
-	fmt.Fprintf(w, "<!DOCTYPE html>\n<pre>\n")
-	fmt.Fprintf(w, "%s\n", html.EscapeString(info.String()))
-}
-
-func greet(w http.ResponseWriter, r *http.Request) {
-	name := strings.Trim(r.URL.Path, "/")
-	if name == "" {
-		name = "Gopher"
-	}
-
-	fmt.Fprintf(w, "<!DOCTYPE html>\n")
-	fmt.Fprintf(w, "%s, %s!\n", *greeting, html.EscapeString(name))
 }
