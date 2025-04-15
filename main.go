@@ -1,13 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func usage() {
@@ -17,8 +18,7 @@ func usage() {
 }
 
 var (
-	greeting = flag.String("g", "Hello", "Greet with `greeting`")
-	addr     = flag.String("addr", "localhost:8080", "address to serve")
+	addr = flag.String("addr", "localhost:8080", "address to serve")
 )
 
 func main() {
@@ -30,15 +30,16 @@ func main() {
 		usage()
 	}
 
-	pool, err := pgx.NewConnPool(pgx.ConnPoolConfig{
-		ConnConfig: pgx.ConnConfig{
-			Host:     "localhost",
-			Port:     5432,
-			Database: "bookshelf",
-			User:     "bookshelf",
-			Password: "bookshelf",
-		},
-	})
+	connString := os.Getenv("DATABASE_URL")
+	if len(connString) == 0 {
+		log.Fatalln("Got empty db connection string")
+	}
+
+	log.Println(connString)
+
+	pool, err := pgxpool.New(
+		context.Background(),
+		connString)
 
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to connect to database: %v\n", err)
@@ -46,9 +47,9 @@ func main() {
 	}
 
 	defer pool.Close()
-	s := Server{db: pool}
 
-	http.HandleFunc("/book", s.handleBook)
+	book := BookHandler{db: pool}
+	http.HandleFunc("/book", book.Handle)
 
 	log.Printf("serving http://%s\n", *addr)
 
