@@ -50,8 +50,6 @@ func main() {
 
 	book := BookHandler{db: pool}
 	http.HandleFunc("/book", book.Handle)
-
 	log.Printf("serving http://%s\n", *addr)
-
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
